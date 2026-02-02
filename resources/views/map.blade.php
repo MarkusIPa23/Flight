@@ -1,10 +1,13 @@
 <!DOCTYPE html>
-<html>
+<html lang="lv">
 <head>
-    <title>Flight Radar Map</title>
+    <meta charset="UTF-8">
+    <title>Lidmašīnu radars</title>
+
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+
     <style>
-        #map { height: 100vh; width: 100%; }
+        #map { height: 100vh; }
     </style>
 </head>
 <body>
@@ -12,55 +15,67 @@
 <div id="map"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-rotatedmarker@0.2.0/leaflet.rotatedMarker.js"></script>
+
 <script>
 const map = L.map('map').setView([20, 0], 2);
 
-// Add OpenStreetMap tiles
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '&copy; OpenStreetMap contributors'
+    attribution: '© OpenStreetMap'
 }).addTo(map);
 
-let markers = [];
+const planeIcon = L.icon({
+    iconUrl: 'https://cdn-icons-png.flaticon.com/512/61/61212.png',
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+});
 
-// Load planes from API
-async function loadPlanes() {
-    try {
-        const res = await fetch('http://127.0.0.1:8000/api/planes'); // full URL for localhost
-        if (!res.ok) throw new Error('Network response was not ok');
+let planes = {};
+const UPDATE_INTERVAL = 5000;
+const ANIMATION_STEPS = 50;
 
-        const planes = await res.json();
+function animateMarker(marker, from, to) {
+    let step = 0;
+    const latStep = (to.lat - from.lat) / ANIMATION_STEPS;
+    const lngStep = (to.lng - from.lng) / ANIMATION_STEPS;
 
-        // Clear old markers
-        markers.forEach(m => map.removeLayer(m));
-        markers = [];
-
-        // Add new markers
-        planes.forEach(plane => {
-            if (!plane.latitude || !plane.longitude) return;
-
-            const marker = L.marker([plane.latitude, plane.longitude])
-                .addTo(map)
-                .bindPopup(`
-                    <b>${plane.callsign || 'N/A'}</b><br>
-                    ${plane.origin_country}<br>
-                    Altitude: ${plane.baro_altitude || 'N/A'} m<br>
-                    Velocity: ${plane.velocity || 'N/A'} m/s
-                `);
-
-            markers.push(marker);
-        });
-
-        console.log('Planes loaded:', planes.length);
-    } catch(err) {
-        console.error('Error loading planes:', err);
-    }
+    const interval = setInterval(() => {
+        step++;
+        marker.setLatLng([
+            from.lat + latStep * step,
+            from.lng + lngStep * step
+        ]);
+        if (step >= ANIMATION_STEPS) clearInterval(interval);
+    }, UPDATE_INTERVAL / ANIMATION_STEPS);
 }
 
-// Initial load
-loadPlanes();
+async function loadPlanes() {
+    const res = await fetch('http://127.0.0.1:8000/api/planes');
+    const data = await res.json();
 
-// Refresh every 30 seconds
-setInterval(loadPlanes, 30000);
+    data.forEach(p => {
+        if (!p.latitude || !p.longitude) return;
+
+        const id = p.icao24;
+        const newPos = L.latLng(p.latitude, p.longitude);
+
+        if (planes[id]) {
+            const oldPos = planes[id].getLatLng();
+            animateMarker(planes[id], oldPos, newPos);
+            planes[id].setRotationAngle(p.heading || 0);
+        } else {
+            planes[id] = L.marker(newPos, {
+                icon: planeIcon,
+                rotationAngle: p.heading || 0,
+                rotationOrigin: 'center center'
+            }).addTo(map);
+        }
+    });
+}
+
+
+loadPlanes();
+setInterval(loadPlanes, UPDATE_INTERVAL);
 </script>
 
 </body>
